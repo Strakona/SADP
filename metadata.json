@@ -1,0 +1,5 @@
+{
+  "name": "SADP - Cianorte",
+  "description": "Sistema de Avaliação Psicomotora para Educação Física. Permite coordenadores cadastrarem professores e professores cadastrarem turmas e avaliarem os alunos em elementos psicomotores.",
+  "requestFramePermissions": []
+}
