@@ -25,27 +25,37 @@ export default function StudentDetails() {
   const [selectedCoordinatorId, setSelectedCoordinatorId] = useState<string>('');
 
   useEffect(() => {
-    if (classId && studentId) {
-      const students = db.getStudents();
-      const classes = db.getClasses();
-      const allEvals = db.getEvaluations();
-      
-      const foundStudent = students.find(s => s.id === studentId);
-      const foundClass = classes.find(c => c.id === classId);
-      
-      if (foundStudent && foundClass) {
-        setStudent(foundStudent);
-        setCls(foundClass);
+    const loadData = async () => {
+      if (classId && studentId) {
+        const students = await db.getStudents();
+        const classes = await db.getClasses();
+        const allEvals = await db.getEvaluations();
         
-        // Get all evaluations for this student, sorted by trimester
-        const studentEvals = allEvals
-          .filter(e => e.studentId === studentId)
-          .sort((a, b) => a.trimester - b.trimester);
-        setEvaluations(studentEvals);
-      } else {
-        navigate('/dashboard');
+        const foundStudent = students.find(s => s.id === studentId);
+        const foundClass = classes.find(c => c.id === classId);
+        
+        if (foundStudent && foundClass) {
+          setStudent(foundStudent);
+          setCls(foundClass);
+          
+          // Get all evaluations for this student, sorted by trimester
+          const studentEvals = allEvals
+            .filter(e => e.studentId === studentId)
+            .sort((a, b) => a.trimester - b.trimester);
+          setEvaluations(studentEvals);
+
+          const allUsers = await db.getUsers();
+          const coords = allUsers.filter(u => u.role === 'coordinator');
+          setCoordinators(coords);
+          if (coords.length > 0) {
+            setSelectedCoordinatorId(coords[0].id);
+          }
+        } else {
+          navigate('/dashboard');
+        }
       }
-    }
+    };
+    loadData();
   }, [classId, studentId, navigate]);
 
   if (!student || !cls) return null;
@@ -64,7 +74,7 @@ export default function StudentDetails() {
     };
   });
 
-  const generateStudentPDF = () => {
+  const generateStudentPDF = async () => {
     if (!student || !cls) return;
     const doc = new jsPDF();
     
@@ -141,13 +151,14 @@ export default function StudentDetails() {
     doc.save(`relatorio_aluno_${student.name.replace(/\s+/g, '_')}.pdf`);
   };
 
-  const handleSendToCoordinator = () => {
+  const handleSendToCoordinator = async () => {
     if (!cls || !user || !student) return;
     
     // Generate PDF first
-    generateStudentPDF();
+    await generateStudentPDF();
 
-    const coords = db.getUsers().filter(u => u.role === 'coordinator');
+    const allUsers = await db.getUsers();
+    const coords = allUsers.filter(u => u.role === 'coordinator');
     if (coords.length === 0) {
       alert('Nenhum coordenador encontrado no sistema.');
       return;
@@ -158,11 +169,11 @@ export default function StudentDetails() {
     setIsCoordinatorModalOpen(true);
   };
 
-  const confirmSendToCoordinator = (e: React.FormEvent) => {
+  const confirmSendToCoordinator = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedCoordinatorId || !cls || !user || !student) return;
 
-    db.addMessage({
+    await db.addMessage({
       id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
       senderId: user.id,
       receiverId: selectedCoordinatorId,

@@ -20,29 +20,32 @@ export default function TeacherClasses() {
   const [editClassYear, setEditClassYear] = useState(new Date().getFullYear());
   const [editClassSchool, setEditClassSchool] = useState('');
 
-  const loadClasses = () => {
+  const loadClasses = async () => {
     if (teacherId) {
-      const allClasses = db.getClasses();
+      const allClasses = await db.getClasses();
       setClasses(allClasses.filter(c => c.teacherId === teacherId));
     }
   };
 
   useEffect(() => {
-    if (user?.role !== 'coordinator' && user?.role !== 'developer') {
-      navigate('/dashboard');
-      return;
-    }
-
-    if (teacherId) {
-      const allUsers = db.getUsers();
-      const foundTeacher = allUsers.find(u => u.id === teacherId && u.role === 'teacher');
-      if (foundTeacher) {
-        setTeacher(foundTeacher);
-        loadClasses();
-      } else {
+    const loadData = async () => {
+      if (user?.role !== 'coordinator' && user?.role !== 'developer') {
         navigate('/dashboard');
+        return;
       }
-    }
+
+      if (teacherId) {
+        const allUsers = await db.getUsers();
+        const foundTeacher = allUsers.find(u => u.id === teacherId && u.role === 'teacher');
+        if (foundTeacher) {
+          setTeacher(foundTeacher);
+          await loadClasses();
+        } else {
+          navigate('/dashboard');
+        }
+      }
+    };
+    loadData();
   }, [teacherId, user, navigate]);
 
   const handleEditClass = (e: React.MouseEvent, cls: Class) => {
@@ -53,7 +56,7 @@ export default function TeacherClasses() {
     setEditClassSchool(cls.school || '');
   };
 
-  const handleUpdateClass = (e: React.FormEvent) => {
+  const handleUpdateClass = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingClass) return;
 
@@ -64,8 +67,8 @@ export default function TeacherClasses() {
       school: editClassSchool || undefined
     };
 
-    db.updateClass(updatedClass);
-    loadClasses();
+    await db.updateClass(updatedClass);
+    await loadClasses();
     setEditingClass(null);
   };
 

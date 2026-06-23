@@ -26,24 +26,35 @@ export default function ClassDetails() {
   const [selectedTrimester, setSelectedTrimester] = useState<1 | 2 | 3>(1);
 
   useEffect(() => {
-    if (classId) {
-      const classes = db.getClasses();
-      const foundClass = classes.find(c => c.id === classId);
-      if (foundClass) {
-        setCls(foundClass);
-        loadStudents(classId);
-      } else {
-        navigate('/dashboard');
+    const loadData = async () => {
+      if (classId) {
+        const classes = await db.getClasses();
+        const foundClass = classes.find(c => c.id === classId);
+        if (foundClass) {
+          setCls(foundClass);
+          const allStudents = await db.getStudents();
+          setStudents(allStudents.filter(s => s.classId === classId));
+          
+          const allUsers = await db.getUsers();
+          const coords = allUsers.filter(u => u.role === 'coordinator');
+          setCoordinators(coords);
+          if (coords.length > 0) {
+            setSelectedCoordinatorId(coords[0].id);
+          }
+        } else {
+          navigate('/dashboard');
+        }
       }
-    }
+    };
+    loadData();
   }, [classId, navigate]);
 
-  const loadStudents = (cId: string) => {
-    const allStudents = db.getStudents();
+  const loadStudents = async (cId: string) => {
+    const allStudents = await db.getStudents();
     setStudents(allStudents.filter(s => s.classId === cId));
   };
 
-  const handleAddStudent = (e: React.FormEvent) => {
+  const handleAddStudent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newStudentName || !newStudentBirth || !classId) return;
 
@@ -54,27 +65,27 @@ export default function ClassDetails() {
       classId: classId
     };
 
-    db.addStudent(newStudent);
-    loadStudents(classId);
+    await db.addStudent(newStudent);
+    await loadStudents(classId);
     setNewStudentName('');
     setNewStudentBirth('');
   };
 
-  const handleDeleteStudent = (studentId: string, studentName: string) => {
+  const handleDeleteStudent = async (studentId: string, studentName: string) => {
     if (window.confirm(`Tem certeza que deseja excluir o aluno "${studentName}"? Todas as avaliações associadas serão removidas.`)) {
-      db.deleteStudent(studentId);
-      if (classId) loadStudents(classId);
+      await db.deleteStudent(studentId);
+      if (classId) await loadStudents(classId);
     }
   };
 
-  const generateAllStudentsPDF = () => {
+  const generateAllStudentsPDF = async () => {
     if (!cls || students.length === 0) {
       alert('Não há alunos nesta turma para gerar relatórios.');
       return;
     }
 
     const doc = new jsPDF();
-    const allEvals = db.getEvaluations();
+    const allEvals = await db.getEvaluations();
     let hasData = false;
 
     students.forEach((student, studentIndex) => {
@@ -156,10 +167,10 @@ export default function ClassDetails() {
     doc.save(`relatorios_individuais_${cls.name.replace(/\s+/g, '_')}_tri${selectedTrimester}.pdf`);
   };
 
-  const handleSendToCoordinator = () => {
+  const handleSendToCoordinator = async () => {
     if (!cls || !user || students.length === 0) return;
     
-    const allEvals = db.getEvaluations();
+    const allEvals = await db.getEvaluations();
     const hasAnyEval = students.some(s => allEvals.some(e => e.studentId === s.id && e.trimester === selectedTrimester));
     
     if (!hasAnyEval) {
@@ -168,9 +179,10 @@ export default function ClassDetails() {
     }
 
     // Generate PDF first
-    generateAllStudentsPDF();
+    await generateAllStudentsPDF();
 
-    const coords = db.getUsers().filter(u => u.role === 'coordinator');
+    const allUsers = await db.getUsers();
+    const coords = allUsers.filter(u => u.role === 'coordinator');
     if (coords.length === 0) {
       alert('Nenhum coordenador encontrado no sistema.');
       return;
@@ -181,11 +193,11 @@ export default function ClassDetails() {
     setIsCoordinatorModalOpen(true);
   };
 
-  const confirmSendToCoordinator = (e: React.FormEvent) => {
+  const confirmSendToCoordinator = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedCoordinatorId || !cls || !user) return;
 
-    db.addMessage({
+    await db.addMessage({
       id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
       senderId: user.id,
       receiverId: selectedCoordinatorId,

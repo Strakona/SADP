@@ -1,0 +1,193 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Fields:
+    //   - id: string (required)
+    //   - name: string (required, 1-100 chars)
+    //   - email: string (required, email format)
+    //   - role: string (required, enum: coordinator, teacher, developer)
+    //   - schools: list (optional, list of strings)
+    //   - notes: string (optional, 0-1000 chars)
+    //
+    // Collection: classes
+    // Fields:
+    //   - id: string (required)
+    //   - name: string (required, 1-100 chars)
+    //   - teacherId: string (required)
+    //   - year: int (required, positive)
+    //   - school: string (optional)
+    //
+    // Collection: students
+    // Fields:
+    //   - id: string (required)
+    //   - name: string (required, 1-100 chars)
+    //   - classId: string (required)
+    //   - birthDate: string (required, ISO 8601)
+    //
+    // Collection: evaluations
+    // Fields:
+    //   - id: string (required)
+    //   - studentId: string (required)
+    //   - classId: string (required)
+    //   - teacherId: string (required)
+    //   - trimester: int (required, 1, 2, or 3)
+    //   - date: string (required, ISO 8601)
+    //   - items: list (required, list of objects with itemId and level)
+    //   - notes: string (optional)
+    //
+    // Collection: messages
+    // Fields:
+    //   - id: string (required)
+    //   - senderId: string (required)
+    //   - receiverId: string (required)
+    //   - content: string (required, 1-2000 chars)
+    //   - timestamp: string (required, ISO 8601)
+    //   - read: bool (required)
+    //   - link: string (optional)
+    //   - linkText: string (optional)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        ((exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'developer') ||
+         (request.auth.token.email == "profcaiocianorte@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isCoordinator() {
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'coordinator';
+    }
+
+    function isTeacher() {
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher';
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidDateString(dateStr) {
+      return dateStr is string && dateStr.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*Z?$");
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return hasOnlyAllowedFields(['id', 'name', 'email', 'role', 'schools', 'notes']) &&
+        data.id is string && data.id.size() > 0 &&
+        data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+        data.email is string && isValidEmail(data.email) &&
+        data.role in ['coordinator', 'teacher', 'developer'] &&
+        (!('schools' in data) || data.schools is list) &&
+        (!('notes' in data) || (data.notes is string && data.notes.size() <= 1000));
+    }
+
+    function isValidClass(data) {
+      return hasOnlyAllowedFields(['id', 'name', 'teacherId', 'year', 'school']) &&
+        data.id is string && data.id.size() > 0 &&
+        data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+        data.teacherId is string &&
+        data.year is int && data.year > 0 &&
+        (!('school' in data) || data.school is string);
+    }
+
+    function isValidStudent(data) {
+      return hasOnlyAllowedFields(['id', 'name', 'classId', 'birthDate']) &&
+        data.id is string && data.id.size() > 0 &&
+        data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+        data.classId is string &&
+        data.birthDate is string;
+    }
+
+    function isValidEvaluation(data) {
+      return hasOnlyAllowedFields(['id', 'studentId', 'classId', 'teacherId', 'trimester', 'date', 'items', 'notes']) &&
+        data.id is string &&
+        data.studentId is string &&
+        data.classId is string &&
+        data.teacherId is string &&
+        data.trimester in [1, 2, 3] &&
+        isValidDateString(data.date) &&
+        data.items is list &&
+        (!('notes' in data) || data.notes is string);
+    }
+
+    function isValidMessage(data) {
+      return hasOnlyAllowedFields(['id', 'senderId', 'receiverId', 'content', 'timestamp', 'read', 'link', 'linkText']) &&
+        data.id is string &&
+        data.senderId is string &&
+        data.receiverId is string &&
+        data.content is string && data.content.size() > 0 && data.content.size() <= 2000 &&
+        isValidDateString(data.timestamp) &&
+        data.read is bool &&
+        (!('link' in data) || data.link is string) &&
+        (!('linkText' in data) || data.linkText is string);
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && (isOwner(userId) || isAdmin() || isCoordinator());
+      allow update: if isAuthenticated() && isValidUser(request.resource.data) && (isOwner(userId) || isAdmin() || isCoordinator());
+      allow delete: if isAdmin() || isCoordinator();
+    }
+
+    match /classes/{classId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidClass(request.resource.data) && (isAdmin() || isCoordinator() || isTeacher());
+      allow update: if isAuthenticated() && isValidClass(request.resource.data) && (isAdmin() || isCoordinator() || isTeacher());
+      allow delete: if isAdmin() || isCoordinator() || isTeacher();
+    }
+
+    match /students/{studentId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidStudent(request.resource.data);
+      allow update: if isAuthenticated() && isValidStudent(request.resource.data);
+      allow delete: if isAuthenticated();
+    }
+
+    match /evaluations/{evaluationId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidEvaluation(request.resource.data);
+      allow update: if isAuthenticated() && isValidEvaluation(request.resource.data);
+      allow delete: if isAuthenticated();
+    }
+
+    match /messages/{messageId} {
+      allow read: if isAuthenticated() && (isOwner(resource.data.receiverId) || isOwner(resource.data.senderId) || isAdmin());
+      allow create: if isAuthenticated() && isValidMessage(request.resource.data) && isOwner(request.resource.data.senderId);
+      allow update: if isAuthenticated() && (isOwner(resource.data.receiverId) || isAdmin()) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+      allow delete: if isAdmin() || isOwner(resource.data.receiverId);
+    }
+  }
+}

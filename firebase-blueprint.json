@@ -1,0 +1,106 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Application users (coordinators, teachers, developers)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["coordinator", "teacher", "developer"] },
+        "schools": { "type": "array", "items": { "type": "string" } },
+        "notes": { "type": "string" }
+      },
+      "required": ["id", "name", "email", "role"]
+    },
+    "Class": {
+      "title": "Class",
+      "description": "School classes",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "year": { "type": "integer" },
+        "school": { "type": "string" }
+      },
+      "required": ["id", "name", "teacherId", "year"]
+    },
+    "Student": {
+      "title": "Student",
+      "description": "Students in a class",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "classId": { "type": "string" },
+        "birthDate": { "type": "string" }
+      },
+      "required": ["id", "name", "classId", "birthDate"]
+    },
+    "Evaluation": {
+      "title": "Evaluation",
+      "description": "Student evaluations",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "studentId": { "type": "string" },
+        "classId": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "trimester": { "type": "integer", "enum": [1, 2, 3] },
+        "date": { "type": "string" },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "itemId": { "type": "integer" },
+              "level": { "type": "string", "enum": ["BEM", "DIFICULDADE", "NAO_EXECUTA"] }
+            }
+          }
+        },
+        "notes": { "type": "string" }
+      },
+      "required": ["id", "studentId", "classId", "teacherId", "trimester", "date", "items"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "Internal messages",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "senderId": { "type": "string" },
+        "receiverId": { "type": "string" },
+        "content": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "read": { "type": "boolean" },
+        "link": { "type": "string" },
+        "linkText": { "type": "string" }
+      },
+      "required": ["id", "senderId", "receiverId", "content", "timestamp", "read"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "/classes/{classId}": {
+      "schema": "Class",
+      "description": "Classes"
+    },
+    "/students/{studentId}": {
+      "schema": "Student",
+      "description": "Students"
+    },
+    "/evaluations/{evaluationId}": {
+      "schema": "Evaluation",
+      "description": "Evaluations"
+    },
+    "/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Messages"
+    }
+  }
+}

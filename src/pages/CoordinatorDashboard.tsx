@@ -9,6 +9,9 @@ import { useNavigate } from 'react-router-dom';
 import { useTheme } from '../lib/ThemeContext';
 import { MessagePanel } from '../components/MessagePanel';
 
+import { secondaryAuth } from '../firebase';
+import { createUserWithEmailAndPassword } from 'firebase/auth';
+
 export default function CoordinatorDashboard() {
   const { user, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
@@ -26,47 +29,63 @@ export default function CoordinatorDashboard() {
   const [messages, setMessages] = useState<Message[]>([]);
 
   useEffect(() => {
-    loadTeachers();
-    loadMessages();
+    const loadData = async () => {
+      if (user) {
+        const msgs = await db.getMessages(user.id);
+        setMessages(msgs);
+        const allUsers = await db.getUsers();
+        setTeachers(allUsers.filter(u => u.role === 'teacher'));
+      }
+    };
+    loadData();
   }, [user]);
 
-  const loadMessages = () => {
+  const loadMessages = async () => {
     if (user) {
-      setMessages(db.getMessages(user.id));
+      const msgs = await db.getMessages(user.id);
+      setMessages(msgs);
     }
   };
 
-  const handleMarkAsRead = (msgId: string) => {
-    db.markMessageAsRead(msgId);
-    loadMessages();
+  const handleMarkAsRead = async (msgId: string) => {
+    await db.markMessageAsRead(msgId);
+    await loadMessages();
   };
 
-  const loadTeachers = () => {
-    const allUsers = db.getUsers();
+  const loadTeachers = async () => {
+    const allUsers = await db.getUsers();
     setTeachers(allUsers.filter(u => u.role === 'teacher'));
   };
 
-  const handleAddTeacher = (e: React.FormEvent) => {
+  const handleAddTeacher = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTeacherName || !newTeacherEmail || !newTeacherPassword) return;
 
-    const schoolsArray = newTeacherSchools.split(',').map(s => s.trim()).filter(s => s !== '');
+    try {
+      const cred = await createUserWithEmailAndPassword(secondaryAuth, newTeacherEmail, newTeacherPassword);
+      const schoolsArray = newTeacherSchools.split(',').map(s => s.trim()).filter(s => s !== '');
 
-    const newTeacher: User = {
-      id: Date.now().toString(),
-      name: newTeacherName,
-      email: newTeacherEmail,
-      password: newTeacherPassword,
-      role: 'teacher',
-      schools: schoolsArray.length > 0 ? schoolsArray : undefined
-    };
+      const newTeacher: User = {
+        id: cred.user.uid,
+        name: newTeacherName,
+        email: newTeacherEmail,
+        role: 'teacher',
+        schools: schoolsArray.length > 0 ? schoolsArray : undefined
+      };
 
-    db.addUser(newTeacher);
-    loadTeachers();
-    setNewTeacherName('');
-    setNewTeacherEmail('');
-    setNewTeacherPassword('');
-    setNewTeacherSchools('');
+      await db.addUser(newTeacher);
+      await secondaryAuth.signOut();
+      
+      await loadTeachers();
+      setNewTeacherName('');
+      setNewTeacherEmail('');
+      setNewTeacherPassword('');
+      setNewTeacherSchools('');
+      alert('Professor cadastrado com sucesso!');
+    } catch (error: any) {
+      console.error(error);
+      alert('Erro ao cadastrar professor: ' + error.message);
+    }
   };
 
   const handleEditTeacher = (teacher: User) => {
@@ -75,7 +94,7 @@ export default function CoordinatorDashboard() {
     setEditingTeacherNotes(teacher.notes || '');
   };
 
-  const handleUpdateTeacher = (e: React.FormEvent) => {
+  const handleUpdateTeacher = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingTeacher) return;
     
@@ -86,30 +105,30 @@ export default function CoordinatorDashboard() {
       notes: editingTeacherNotes
     };
     
-    db.updateUser(updatedTeacher);
-    loadTeachers();
+    await db.updateUser(updatedTeacher);
+    await loadTeachers();
     setEditingTeacher(null);
     setEditingTeacherSchools('');
     setEditingTeacherNotes('');
   };
 
-  const handleDeleteTeacher = (teacherId: string, teacherName: string) => {
+  const handleDeleteTeacher = async (teacherId: string, teacherName: string) => {
     if (window.confirm(`Tem certeza que deseja excluir o professor "${teacherName}"?`)) {
-      db.deleteUser(teacherId);
-      loadTeachers();
+      await db.deleteUser(teacherId);
+      await loadTeachers();
     }
   };
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     navigate('/login');
   };
 
-  const handleSendMessage = (e: React.FormEvent) => {
+  const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!messagingTeacher || !messageContent.trim() || !user) return;
 
-    db.addMessage({
+    await db.addMessage({
       id: Date.now().toString(),
       senderId: user.id,
       receiverId: messagingTeacher.id,

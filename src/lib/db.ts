@@ -1,197 +1,410 @@
-import { User, Class, Student, Evaluation, EvaluationLevel, Message } from '../types';
+import { User, Class, Student, Evaluation, Message } from '../types';
+import { db as firestore, handleFirestoreError, OperationType } from '../firebase';
+import { 
+  collection, 
+  doc, 
+  getDoc, 
+  getDocs, 
+  setDoc, 
+  updateDoc, 
+  deleteDoc, 
+  query, 
+  where, 
+  orderBy,
+  writeBatch
+} from 'firebase/firestore';
 
-const DB_KEY = 'psico_db_demo_v2';
+export const isLocalMode = () => localStorage.getItem('sadp_use_local_db') === 'true';
 
-interface DbSchema {
-  users: User[];
-  classes: Class[];
-  students: Student[];
-  evaluations: Evaluation[];
-  messages: Message[];
-}
-
-function generateDemoData(): DbSchema {
-  const data: DbSchema = {
-    users: [
-      { id: '0', name: 'Desenvolvedor', email: 'dev@escola.com', role: 'developer', password: 'dev' },
-      { id: '1', name: 'Coordenador Admin', email: 'admin@escola.com', role: 'coordinator', password: 'admin' },
-      { id: '2', name: 'Professor João', email: 'joao@escola.com', role: 'teacher', password: '123', schools: ['Escola Municipal A', 'Escola Municipal B'] },
-    ],
-    classes: [],
-    students: [],
-    evaluations: [],
-    messages: []
-  };
-
-  const classNames = ['Pré 1', 'Pré 2', '1º ano', '2º ano', '3º ano', '4º ano', '5º ano'];
-  const teacherId = '2';
-  
-  const firstNames = ['Miguel', 'Arthur', 'Gael', 'Heitor', 'Theo', 'Davi', 'Gabriel', 'Bernardo', 'Samuel', 'João Miguel', 'Enzo Gabriel', 'Alice', 'Laura', 'Helena', 'Valentina', 'Sophia', 'Isabella', 'Manuela', 'Júlia', 'Heloísa', 'Lívia', 'Maria Eduarda', 'Lorena', 'Giovanna', 'Maria Clara', 'Pedro', 'Lucas', 'Matheus', 'Gustavo', 'Rafael', 'Nicolas', 'Guilherme', 'Felipe', 'Isaac', 'Zayn', 'Lucca', 'Daniel', 'Beatriz', 'Mariana', 'Melissa', 'Cecília', 'Esther', 'Emanuelly', 'Sarah', 'Lavínia', 'Isadora', 'Isabelly', 'Catarina'];
-  const lastNames = ['Silva', 'Santos', 'Oliveira', 'Souza', 'Rodrigues', 'Ferreira', 'Alves', 'Pereira', 'Lima', 'Gomes', 'Costa', 'Ribeiro', 'Martins', 'Carvalho', 'Almeida', 'Lopes', 'Soares', 'Fernandes', 'Vieira', 'Dias', 'Borges', 'Mendes', 'Nunes', 'Melo'];
-
-  let studentIdCounter = 1;
-  let evalIdCounter = 1;
-
-  classNames.forEach((className, index) => {
-    const classId = `c${index + 1}`;
-    data.classes.push({
-      id: classId,
-      name: className,
-      teacherId,
-      year: 2026
-    });
-
-    for (let i = 0; i < 25; i++) {
-      const studentId = `s${studentIdCounter++}`;
-      const firstName = firstNames[Math.floor(Math.random() * firstNames.length)];
-      const lastName = lastNames[Math.floor(Math.random() * lastNames.length)];
-      
-      data.students.push({
-        id: studentId,
-        name: `${firstName} ${lastName}`,
-        classId,
-        birthDate: `201${8 - index}-0${Math.floor(Math.random() * 8) + 1}-1${Math.floor(Math.random() * 8) + 1}`
-      });
-
-      // Generate evaluation for Trimester 1
-      const items = [];
-      for (let itemId = 1; itemId <= 40; itemId++) {
-        const rand = Math.random();
-        let level: EvaluationLevel = 'BEM';
-        // Make older kids perform slightly better
-        const difficultyFactor = index * 0.05; 
-        if (rand > 0.85 + difficultyFactor) level = 'NAO_EXECUTA';
-        else if (rand > 0.6 + difficultyFactor) level = 'DIFICULDADE';
-
-        items.push({ itemId, level });
-      }
-
-      data.evaluations.push({
-        id: `e${evalIdCounter++}`,
-        studentId,
-        classId,
-        teacherId,
-        trimester: 1,
-        date: new Date().toISOString(),
-        items
-      });
-    }
-  });
-
-  return data;
-}
-
-export const getDb = (): DbSchema => {
-  const data = localStorage.getItem(DB_KEY);
-  if (!data) {
-    const demoData = generateDemoData();
-    localStorage.setItem(DB_KEY, JSON.stringify(demoData));
-    return demoData;
-  }
-  
-  const parsed = JSON.parse(data);
-  // Ensure developer exists
-  if (!parsed.users.some((u: User) => u.role === 'developer')) {
-    parsed.users.push({ id: '0', name: 'Desenvolvedor', email: 'dev@escola.com', role: 'developer', password: 'dev' });
-    localStorage.setItem(DB_KEY, JSON.stringify(parsed));
-  }
-  
-  return parsed;
+// Local storage helpers
+const getLocalCollection = <T>(key: string): T[] => {
+  const value = localStorage.getItem(key);
+  return value ? JSON.parse(value) : [];
 };
 
-export const saveDb = (data: DbSchema) => {
-  localStorage.setItem(DB_KEY, JSON.stringify(data));
+const setLocalCollection = <T>(key: string, data: T[]) => {
+  localStorage.setItem(key, JSON.stringify(data));
+};
+
+// Auto semente (seed) para o modo local
+export const seedLocalDb = (force = false) => {
+  if (!force && localStorage.getItem('sadp_local_seeded') === 'true') {
+    return;
+  }
+
+  const localUsers: User[] = [
+    { id: 'dev_local_uid', name: 'Caio (Desenvolvedor Local)', email: 'dev@escola.com', role: 'developer' },
+    { id: 'coord_local_uid', name: 'Marta Coordenadora', email: 'admin@escola.com', role: 'coordinator' },
+    { id: 'teacher_local_uid', name: 'João Professor', email: 'joao@escola.com', role: 'teacher' }
+  ];
+
+  const localClasses: Class[] = [
+    { id: 'class_local_1', name: '1º Ano A - Vespertino', teacherId: 'teacher_local_uid', year: 2026, school: 'Escola Municipal Gonçalo Moreno' },
+    { id: 'class_local_2', name: '2º Ano B - Matutino', teacherId: 'teacher_local_uid', year: 2026, school: 'Escola Municipal Rainha da Paz' },
+    { id: 'class_local_3', name: '5º Ano A - Vespertino', teacherId: 'teacher_local_uid', year: 2026, school: 'Escola Municipal Gonçalo Moreno' },
+    { id: 'class_local_dev_1', name: '3º Ano C - Cianorte', teacherId: 'dev_local_uid', year: 2026, school: 'Escola Central' }
+  ];
+
+  const localStudents: Student[] = [
+    { id: 'st_local_1', name: 'Arthur Silva Mendonça', classId: 'class_local_1', birthDate: '2019-04-12' },
+    { id: 'st_local_2', name: 'Beatriz Ramos de Castro', classId: 'class_local_1', birthDate: '2019-08-22' },
+    { id: 'st_local_3', name: 'Caio Vinícius Oliveira', classId: 'class_local_1', birthDate: '2019-01-05' },
+    { id: 'st_local_4', name: 'Davi Miguel Ferreira', classId: 'class_local_1', birthDate: '2019-11-14' },
+    { id: 'st_local_5', name: 'Eloá Cristina Santos', classId: 'class_local_1', birthDate: '2019-06-30' },
+
+    { id: 'st_local_6', name: 'Gabriel Henrique Lima', classId: 'class_local_2', birthDate: '2018-03-15' },
+    { id: 'st_local_7', name: 'Helena Vitória Gomes', classId: 'class_local_2', birthDate: '2018-05-20' },
+    { id: 'st_local_8', name: 'Isabella Rodrigues', classId: 'class_local_2', birthDate: '2018-09-11' },
+
+    { id: 'st_local_9', name: 'Nicole Souza Rocha', classId: 'class_local_3', birthDate: '2015-10-22' },
+    { id: 'st_local_10', name: 'Otávio Augusto Alves', classId: 'class_local_3', birthDate: '2015-06-03' },
+
+    { id: 'st_local_11', name: 'Clara Maria Ribeiro', classId: 'class_local_dev_1', birthDate: '2017-03-14' },
+    { id: 'st_local_12', name: 'Felipe Neto Guimarães', classId: 'class_local_dev_1', birthDate: '2017-07-25' }
+  ];
+
+  const localEvaluations: Evaluation[] = [];
+  const trimesters = [1, 2] as const;
+
+  localStudents.forEach((student) => {
+    trimesters.forEach((trimester) => {
+      const items: any[] = [];
+      for (let i = 1; i <= 40; i++) {
+        let level: 'BEM' | 'DIFICULDADE' | 'NAO_EXECUTA' = 'BEM';
+        
+        if (trimester === 1) {
+          if (i % 7 === 0) level = 'NAO_EXECUTA';
+          else if (i % 4 === 0) level = 'DIFICULDADE';
+        } else {
+          if (i % 12 === 0) level = 'DIFICULDADE';
+        }
+        items.push({ itemId: i, level });
+      }
+
+      let teacherId = 'teacher_local_uid';
+      if (student.classId === 'class_local_dev_1') {
+        teacherId = 'dev_local_uid';
+      }
+
+      localEvaluations.push({
+        id: `eval_local_${student.id}_t${trimester}`,
+        studentId: student.id,
+        classId: student.classId,
+        teacherId,
+        trimester,
+        date: trimester === 1 ? '2026-04-10T14:30:00Z' : '2026-08-15T10:00:00Z',
+        items,
+        notes: `Desenvolvimento ${trimester === 1 ? 'inicial' : 'com excelente evolução'} observado localmente nas aulas de EF.`
+      });
+    });
+  });
+
+  const localMessages: Message[] = [
+    {
+      id: 'msg_local_1',
+      senderId: 'coord_local_uid',
+      receiverId: 'teacher_local_uid',
+      content: 'Olá Professor João! Entrei para avisar que o sistema local está totalmente operacional.',
+      timestamp: new Date().toISOString(),
+      read: false
+    },
+    {
+      id: 'msg_local_2',
+      senderId: 'coord_local_uid',
+      receiverId: 'dev_local_uid',
+      content: 'Bem-vindo ao modo local offline, Caio! Aqui, todos os testes ocorrem instantaneamente no seu navegador sem limite ou dependência de Auth do Firebase.',
+      timestamp: new Date().toISOString(),
+      read: false
+    }
+  ];
+
+  setLocalCollection('sadp_local_users', localUsers);
+  setLocalCollection('sadp_local_classes', localClasses);
+  setLocalCollection('sadp_local_students', localStudents);
+  setLocalCollection('sadp_local_evaluations', localEvaluations);
+  setLocalCollection('sadp_local_messages', localMessages);
+
+  localStorage.setItem('sadp_local_seeded', 'true');
+};
+
+export const clearLocalDb = () => {
+  localStorage.removeItem('sadp_local_users');
+  localStorage.removeItem('sadp_local_classes');
+  localStorage.removeItem('sadp_local_students');
+  localStorage.removeItem('sadp_local_evaluations');
+  localStorage.removeItem('sadp_local_messages');
+  localStorage.removeItem('sadp_local_seeded');
+  seedLocalDb(true);
 };
 
 export const db = {
-  getUsers: () => getDb().users,
-  addUser: (user: User) => {
-    const data = getDb();
-    data.users.push(user);
-    saveDb(data);
-  },
-  updateUser: (user: User) => {
-    const data = getDb();
-    const index = data.users.findIndex(u => u.id === user.id);
-    if (index >= 0) {
-      data.users[index] = user;
-      saveDb(data);
+  getUsers: async (): Promise<User[]> => {
+    if (isLocalMode()) {
+      seedLocalDb();
+      return getLocalCollection<User>('sadp_local_users');
+    }
+    const path = 'users';
+    try {
+      const snapshot = await getDocs(collection(firestore, path));
+      return snapshot.docs.map(d => d.data() as User);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, path);
+      return [];
     }
   },
-  deleteUser: (userId: string) => {
-    const data = getDb();
-    data.users = data.users.filter(u => u.id !== userId);
-    // Note: We might want to handle orphan classes/evaluations here, 
-    // but for now just deleting the user is fine for the demo.
-    saveDb(data);
-  },
-  getClasses: () => getDb().classes,
-  addClass: (cls: Class) => {
-    const data = getDb();
-    data.classes.push(cls);
-    saveDb(data);
-  },
-  updateClass: (cls: Class) => {
-    const data = getDb();
-    const index = data.classes.findIndex(c => c.id === cls.id);
-    if (index >= 0) {
-      data.classes[index] = cls;
-      saveDb(data);
+  addUser: async (user: User) => {
+    if (isLocalMode()) {
+      seedLocalDb();
+      const users = getLocalCollection<User>('sadp_local_users');
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { password, ...userData } = user;
+      const index = users.findIndex(u => u.id === user.id);
+      if (index >= 0) {
+        users[index] = { ...users[index], ...userData };
+      } else {
+        users.push(userData as User);
+      }
+      setLocalCollection('sadp_local_users', users);
+      return;
+    }
+    const path = `users/${user.id}`;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { password, ...userData } = user;
+      await setDoc(doc(firestore, 'users', user.id), userData);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, path);
     }
   },
-  getStudents: () => getDb().students,
-  addStudent: (student: Student) => {
-    const data = getDb();
-    data.students.push(student);
-    saveDb(data);
-  },
-  getEvaluations: () => getDb().evaluations,
-  addEvaluation: (evaluation: Evaluation) => {
-    const data = getDb();
-    const existingIndex = data.evaluations.findIndex(e => e.studentId === evaluation.studentId && e.trimester === evaluation.trimester);
-    if (existingIndex >= 0) {
-      data.evaluations[existingIndex] = evaluation;
-    } else {
-      data.evaluations.push(evaluation);
+  updateUser: async (user: User) => {
+    if (isLocalMode()) {
+      seedLocalDb();
+      const users = getLocalCollection<User>('sadp_local_users');
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { password, ...userData } = user;
+      const index = users.findIndex(u => u.id === user.id);
+      if (index >= 0) {
+        users[index] = { ...users[index], ...userData };
+        setLocalCollection('sadp_local_users', users);
+      }
+      return;
     }
-    saveDb(data);
+    const path = `users/${user.id}`;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { password, ...userData } = user;
+      await updateDoc(doc(firestore, 'users', user.id), { ...userData });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
+    }
   },
-  deleteClass: (classId: string) => {
-    const data = getDb();
-    // Delete class
-    data.classes = data.classes.filter(c => c.id !== classId);
-    // Delete associated students
-    const studentsToDelete = data.students.filter(s => s.classId === classId).map(s => s.id);
-    data.students = data.students.filter(s => s.classId !== classId);
-    // Delete associated evaluations
-    data.evaluations = data.evaluations.filter(e => !studentsToDelete.includes(e.studentId));
-    saveDb(data);
+  deleteUser: async (userId: string) => {
+    if (isLocalMode()) {
+      seedLocalDb();
+      const users = getLocalCollection<User>('sadp_local_users');
+      setLocalCollection('sadp_local_users', users.filter(u => u.id !== userId));
+      return;
+    }
+    const path = `users/${userId}`;
+    try {
+      await deleteDoc(doc(firestore, 'users', userId));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, path);
+    }
   },
-  deleteStudent: (studentId: string) => {
-    const data = getDb();
-    // Delete student
-    data.students = data.students.filter(s => s.id !== studentId);
-    // Delete associated evaluations
-    data.evaluations = data.evaluations.filter(e => e.studentId !== studentId);
-    saveDb(data);
+  getClasses: async (): Promise<Class[]> => {
+    if (isLocalMode()) {
+      seedLocalDb();
+      return getLocalCollection<Class>('sadp_local_classes');
+    }
+    const path = 'classes';
+    try {
+      const snapshot = await getDocs(collection(firestore, path));
+      return snapshot.docs.map(d => d.data() as Class);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, path);
+      return [];
+    }
   },
-  getMessages: (userId: string) => {
-    const data = getDb();
-    return (data.messages || []).filter(m => m.receiverId === userId).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  addClass: async (cls: Class) => {
+    if (isLocalMode()) {
+      seedLocalDb();
+      const classes = getLocalCollection<Class>('sadp_local_classes');
+      classes.push(cls);
+      setLocalCollection('sadp_local_classes', classes);
+      return;
+    }
+    const path = `classes/${cls.id}`;
+    try {
+      await setDoc(doc(firestore, 'classes', cls.id), cls);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, path);
+    }
   },
-  addMessage: (message: Message) => {
-    const data = getDb();
-    if (!data.messages) data.messages = [];
-    data.messages.push(message);
-    saveDb(data);
+  updateClass: async (cls: Class) => {
+    if (isLocalMode()) {
+      seedLocalDb();
+      const classes = getLocalCollection<Class>('sadp_local_classes');
+      const index = classes.findIndex(c => c.id === cls.id);
+      if (index >= 0) {
+        classes[index] = cls;
+        setLocalCollection('sadp_local_classes', classes);
+      }
+      return;
+    }
+    const path = `classes/${cls.id}`;
+    try {
+      await updateDoc(doc(firestore, 'classes', cls.id), { ...cls });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
+    }
   },
-  markMessageAsRead: (messageId: string) => {
-    const data = getDb();
-    if (!data.messages) return;
-    const msg = data.messages.find(m => m.id === messageId);
-    if (msg) {
-      msg.read = true;
-      saveDb(data);
+  getStudents: async (): Promise<Student[]> => {
+    if (isLocalMode()) {
+      seedLocalDb();
+      return getLocalCollection<Student>('sadp_local_students');
+    }
+    const path = 'students';
+    try {
+      const snapshot = await getDocs(collection(firestore, path));
+      return snapshot.docs.map(d => d.data() as Student);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, path);
+      return [];
+    }
+  },
+  addStudent: async (student: Student) => {
+    if (isLocalMode()) {
+      seedLocalDb();
+      const students = getLocalCollection<Student>('sadp_local_students');
+      students.push(student);
+      setLocalCollection('sadp_local_students', students);
+      return;
+    }
+    const path = `students/${student.id}`;
+    try {
+      await setDoc(doc(firestore, 'students', student.id), student);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, path);
+    }
+  },
+  getEvaluations: async (): Promise<Evaluation[]> => {
+    if (isLocalMode()) {
+      seedLocalDb();
+      return getLocalCollection<Evaluation>('sadp_local_evaluations');
+    }
+    const path = 'evaluations';
+    try {
+      const snapshot = await getDocs(collection(firestore, path));
+      return snapshot.docs.map(d => d.data() as Evaluation);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, path);
+      return [];
+    }
+  },
+  addEvaluation: async (evaluation: Evaluation) => {
+    if (isLocalMode()) {
+      seedLocalDb();
+      const evals = getLocalCollection<Evaluation>('sadp_local_evaluations');
+      const index = evals.findIndex(e => e.id === evaluation.id);
+      if (index >= 0) {
+        evals[index] = evaluation;
+      } else {
+        evals.push(evaluation);
+      }
+      setLocalCollection('sadp_local_evaluations', evals);
+      return;
+    }
+    const path = `evaluations/${evaluation.id}`;
+    try {
+      await setDoc(doc(firestore, 'evaluations', evaluation.id), evaluation);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, path);
+    }
+  },
+  deleteClass: async (classId: string) => {
+    if (isLocalMode()) {
+      seedLocalDb();
+      const classes = getLocalCollection<Class>('sadp_local_classes');
+      setLocalCollection('sadp_local_classes', classes.filter(c => c.id !== classId));
+      return;
+    }
+    const path = `classes/${classId}`;
+    try {
+      const batch = writeBatch(firestore);
+      batch.delete(doc(firestore, 'classes', classId));
+      await batch.commit();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, path);
+    }
+  },
+  deleteStudent: async (studentId: string) => {
+    if (isLocalMode()) {
+      seedLocalDb();
+      const students = getLocalCollection<Student>('sadp_local_students');
+      setLocalCollection('sadp_local_students', students.filter(s => s.id !== studentId));
+      return;
+    }
+    const path = `students/${studentId}`;
+    try {
+      await deleteDoc(doc(firestore, 'students', studentId));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, path);
+    }
+  },
+  getMessages: async (userId: string): Promise<Message[]> => {
+    if (isLocalMode()) {
+      seedLocalDb();
+      const messages = getLocalCollection<Message>('sadp_local_messages');
+      return messages
+        .filter(m => m.receiverId === userId)
+        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    }
+    const path = 'messages';
+    try {
+      const q = query(
+        collection(firestore, path), 
+        where('receiverId', '==', userId),
+        orderBy('timestamp', 'desc')
+      );
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map(d => d.data() as Message);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, path);
+      return [];
+    }
+  },
+  addMessage: async (message: Message) => {
+    if (isLocalMode()) {
+      seedLocalDb();
+      const messages = getLocalCollection<Message>('sadp_local_messages');
+      messages.push(message);
+      setLocalCollection('sadp_local_messages', messages);
+      return;
+    }
+    const path = `messages/${message.id}`;
+    try {
+      await setDoc(doc(firestore, 'messages', message.id), message);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, path);
+    }
+  },
+  markMessageAsRead: async (messageId: string) => {
+    if (isLocalMode()) {
+      seedLocalDb();
+      const messages = getLocalCollection<Message>('sadp_local_messages');
+      const index = messages.findIndex(m => m.id === messageId);
+      if (index >= 0) {
+        messages[index].read = true;
+        setLocalCollection('sadp_local_messages', messages);
+      }
+      return;
+    }
+    const path = `messages/${messageId}`;
+    try {
+      await updateDoc(doc(firestore, 'messages', messageId), { read: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
     }
   }
 };

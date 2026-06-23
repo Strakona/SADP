@@ -8,10 +8,10 @@ import { LogOut, PlusCircle, Users, ChevronRight, Upload, FileText, Trash2, Sun,
 import { useNavigate } from 'react-router-dom';
 import { useTheme } from '../lib/ThemeContext';
 import { MessagePanel } from '../components/MessagePanel';
-import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.js';
-import pdfWorker from 'pdfjs-dist/legacy/build/pdf.worker.js?url';
+import * as pdfjsLib from 'pdfjs-dist';
+import pdfWorker from 'pdfjs-dist/build/pdf.worker.mjs?url';
 
-// Configure PDF.js worker using Vite's ?url import (v2.16.105)
+// Configure PDF.js worker using Vite's ?url import
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
 export default function TeacherDashboard() {
@@ -31,28 +31,36 @@ export default function TeacherDashboard() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    loadClasses();
-    loadMessages();
+    const loadData = async () => {
+      if (user) {
+        const msgs = await db.getMessages(user.id);
+        setMessages(msgs);
+        const allClasses = await db.getClasses();
+        setClasses(allClasses.filter(c => c.teacherId === user.id));
+      }
+    };
+    loadData();
   }, [user]);
 
-  const loadMessages = () => {
+  const loadMessages = async () => {
     if (user) {
-      setMessages(db.getMessages(user.id));
+      const msgs = await db.getMessages(user.id);
+      setMessages(msgs);
     }
   };
 
-  const handleMarkAsRead = (msgId: string) => {
-    db.markMessageAsRead(msgId);
-    loadMessages();
+  const handleMarkAsRead = async (msgId: string) => {
+    await db.markMessageAsRead(msgId);
+    await loadMessages();
   };
 
-  const loadClasses = () => {
+  const loadClasses = async () => {
     if (!user) return;
-    const allClasses = db.getClasses();
+    const allClasses = await db.getClasses();
     setClasses(allClasses.filter(c => c.teacherId === user.id));
   };
 
-  const handleAddClass = (e: React.FormEvent) => {
+  const handleAddClass = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newClassName || !user) return;
 
@@ -64,17 +72,17 @@ export default function TeacherDashboard() {
       school: newClassSchool || undefined
     };
 
-    db.addClass(newClass);
-    loadClasses();
+    await db.addClass(newClass);
+    await loadClasses();
     setNewClassName('');
     setNewClassSchool('');
   };
 
-  const handleDeleteClass = (e: React.MouseEvent, classId: string, className: string) => {
+  const handleDeleteClass = async (e: React.MouseEvent, classId: string, className: string) => {
     e.stopPropagation();
     if (window.confirm(`Tem certeza que deseja excluir a turma "${className}"? Todos os alunos e avaliações associados serão removidos.`)) {
-      db.deleteClass(classId);
-      loadClasses();
+      await db.deleteClass(classId);
+      await loadClasses();
     }
   };
 
@@ -86,7 +94,7 @@ export default function TeacherDashboard() {
     setEditClassSchool(cls.school || '');
   };
 
-  const handleUpdateClass = (e: React.FormEvent) => {
+  const handleUpdateClass = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingClass) return;
 
@@ -97,8 +105,8 @@ export default function TeacherDashboard() {
       school: editClassSchool || undefined
     };
 
-    db.updateClass(updatedClass);
-    loadClasses();
+    await db.updateClass(updatedClass);
+    await loadClasses();
     setEditingClass(null);
   };
 
@@ -120,7 +128,6 @@ export default function TeacherDashboard() {
       }
 
       // Extract Class Name
-      // Look for patterns like "Série: INFANTIL 4" or "Turma: E"
       const serieMatch = fullText.match(/S[ée]rie[^\w]*([A-Za-z0-9\s]+?)(?=\s+Turno|\s+Turma|$)/i);
       const turmaMatch = fullText.match(/Turma[^\w]*([A-Za-z0-9]+)/i);
       
@@ -142,10 +149,9 @@ export default function TeacherDashboard() {
         teacherId: user.id,
         school: user.schools?.[0] || undefined
       };
-      db.addClass(newClass);
+      await db.addClass(newClass);
 
       // Extract Students
-      // Match pattern: Name (letters, spaces, hyphens) followed by Date (DD/MM/YYYY)
       const studentRegex = /([A-ZÀ-Ÿa-zà-ÿ][A-ZÀ-Ÿa-zà-ÿ\s'\-]{4,})\s+(\d{2}[\/\-\.]\d{2}[\/\-\.]\d{4})/g;
       
       let match;
@@ -155,10 +161,8 @@ export default function TeacherDashboard() {
         const dateStr = match[2];
         const [day, month, year] = dateStr.split(/[\/\-\.]/);
         
-        // Clean up name: remove common status words that might have been prepended
         name = name.replace(/^(MATRICULADO|SITUACAO|SITUAÇÃO|ATIVO|INATIVO|TRANSFERIDO|DESISTENTE|CURSANDO|APROVADO|REPROVADO|MASCULINO|FEMININO|SIM|NAO|NÃO)\s+/i, '').trim();
         
-        // Avoid adding if the name is just a status word
         const upperName = name.toUpperCase();
         if (['MATRICULADO', 'SITUACAO', 'SITUAÇÃO', 'ATIVO', 'TRANSFERIDO', 'DESISTENTE'].includes(upperName)) continue;
         
@@ -170,11 +174,11 @@ export default function TeacherDashboard() {
           birthDate: `${year}-${month}-${day}`,
           classId: classId
         };
-        db.addStudent(newStudent);
+        await db.addStudent(newStudent);
         studentCount++;
       }
 
-      // Fallback if no students were found with dates (try to find numbered lists)
+      // Fallback if no students were found with dates
       if (studentCount === 0) {
         const fallbackRegex = /(?:^|\s)(?:\d{1,3}[\.\-]?\s+)([A-ZÀ-Ÿa-zà-ÿ][A-ZÀ-Ÿa-zà-ÿ\s'\-]{5,})(?=\s+\d{1,3}[\.\-]?\s+|\s*$|\s+(?:MATRICULADO|SITUACAO|SITUAÇÃO|ATIVO|INATIVO|TRANSFERIDO|DESISTENTE|CURSANDO|APROVADO|REPROVADO))/gi;
         
@@ -194,12 +198,12 @@ export default function TeacherDashboard() {
             birthDate: `${new Date().getFullYear()}-01-01`, // Default date
             classId: classId
           };
-          db.addStudent(newStudent);
+          await db.addStudent(newStudent);
           studentCount++;
         }
       }
 
-      loadClasses();
+      await loadClasses();
       alert(`Turma "${className}" criada com sucesso! ${studentCount} alunos importados.`);
     } catch (error) {
       console.error("Error parsing PDF:", error);
@@ -212,8 +216,8 @@ export default function TeacherDashboard() {
     }
   };
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     navigate('/login');
   };
 

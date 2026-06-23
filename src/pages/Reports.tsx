@@ -27,45 +27,57 @@ export default function ReportsPage() {
   const [selectedTeacherId, setSelectedTeacherId] = useState<string>('');
 
   useEffect(() => {
-    if (user?.role === 'coordinator' || user?.role === 'developer') {
-      setTeachers(db.getUsers().filter(u => u.role === 'teacher'));
-    }
+    const loadData = async () => {
+      if (user?.role === 'coordinator' || user?.role === 'developer') {
+        const allUsers = await db.getUsers();
+        setTeachers(allUsers.filter(u => u.role === 'teacher'));
+      }
+    };
+    loadData();
   }, [user]);
 
   useEffect(() => {
-    if (user?.role === 'coordinator' || user?.role === 'developer') {
-      if (selectedTeacherId) {
-        setClasses(db.getClasses().filter(c => c.teacherId === selectedTeacherId));
-      } else {
-        setClasses([]);
+    const loadData = async () => {
+      if (user?.role === 'coordinator' || user?.role === 'developer') {
+        if (selectedTeacherId) {
+          const allClasses = await db.getClasses();
+          setClasses(allClasses.filter(c => c.teacherId === selectedTeacherId));
+        } else {
+          setClasses([]);
+        }
+      } else if (user?.role === 'teacher') {
+        const allClasses = await db.getClasses();
+        setClasses(allClasses.filter(c => c.teacherId === user.id));
       }
-    } else if (user?.role === 'teacher') {
-      setClasses(db.getClasses().filter(c => c.teacherId === user.id));
-    }
+    };
+    loadData();
   }, [selectedTeacherId, user]);
 
   useEffect(() => {
-    if (classId) {
-      const allClasses = db.getClasses();
-      const foundClass = allClasses.find(c => c.id === classId);
-      if (foundClass) {
-        setCls(foundClass);
-        if (user?.role === 'coordinator' || user?.role === 'developer') {
-          setSelectedTeacherId(foundClass.teacherId);
+    const loadData = async () => {
+      if (classId) {
+        const allClasses = await db.getClasses();
+        const foundClass = allClasses.find(c => c.id === classId);
+        if (foundClass) {
+          setCls(foundClass);
+          if (user?.role === 'coordinator' || user?.role === 'developer') {
+            setSelectedTeacherId(foundClass.teacherId);
+          }
+          const allStudents = await db.getStudents();
+          setStudents(allStudents.filter(s => s.classId === classId));
+          
+          const allEvals = await db.getEvaluations();
+          setEvaluations(allEvals.filter(e => e.classId === classId));
+        } else {
+          navigate('/reports');
         }
-        const allStudents = db.getStudents();
-        setStudents(allStudents.filter(s => s.classId === classId));
-        
-        const allEvals = db.getEvaluations();
-        setEvaluations(allEvals.filter(e => e.classId === classId));
       } else {
-        navigate('/reports');
+        setCls(null);
+        setStudents([]);
+        setEvaluations([]);
       }
-    } else {
-      setCls(null);
-      setStudents([]);
-      setEvaluations([]);
-    }
+    };
+    loadData();
   }, [classId, navigate, user]);
 
   const getChartData = () => {
@@ -177,14 +189,15 @@ export default function ReportsPage() {
     doc.save(`relatorio_${cls.name.replace(/\s+/g, '_')}_trimestre_${selectedTrimester}.pdf`);
   };
 
-  const handleSendToCoordinator = () => {
+  const handleSendToCoordinator = async () => {
     if (!cls || !user) return;
     
     // First, generate the PDF
     exportToPDF();
 
     // Then, fetch coordinators and open modal
-    const coords = db.getUsers().filter(u => u.role === 'coordinator');
+    const allUsers = await db.getUsers();
+    const coords = allUsers.filter(u => u.role === 'coordinator');
     if (coords.length === 0) {
       alert('Nenhum coordenador encontrado no sistema.');
       return;
@@ -195,11 +208,11 @@ export default function ReportsPage() {
     setIsCoordinatorModalOpen(true);
   };
 
-  const confirmSendToCoordinator = (e: React.FormEvent) => {
+  const confirmSendToCoordinator = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedCoordinatorId || !cls || !user) return;
 
-    db.addMessage({
+    await db.addMessage({
       id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
       senderId: user.id,
       receiverId: selectedCoordinatorId,

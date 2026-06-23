@@ -22,24 +22,27 @@ export default function EvaluationPage() {
   const [notes, setNotes] = useState<string>('');
 
   useEffect(() => {
-    if (classId && studentId) {
-      const students = db.getStudents();
-      const classes = db.getClasses();
-      const foundStudent = students.find(s => s.id === studentId);
-      const foundClass = classes.find(c => c.id === classId);
-      
-      if (foundStudent && foundClass) {
-        setStudent(foundStudent);
-        setCls(foundClass);
-        loadExistingEvaluation(studentId, 1);
-      } else {
-        navigate('/dashboard');
+    const loadData = async () => {
+      if (classId && studentId) {
+        const students = await db.getStudents();
+        const classes = await db.getClasses();
+        const foundStudent = students.find(s => s.id === studentId);
+        const foundClass = classes.find(c => c.id === classId);
+        
+        if (foundStudent && foundClass) {
+          setStudent(foundStudent);
+          setCls(foundClass);
+          await loadExistingEvaluation(studentId, 1);
+        } else {
+          navigate('/dashboard');
+        }
       }
-    }
+    };
+    loadData();
   }, [classId, studentId, navigate]);
 
-  const loadExistingEvaluation = (sId: string, trim: 1 | 2 | 3) => {
-    const allEvals = db.getEvaluations();
+  const loadExistingEvaluation = async (sId: string, trim: 1 | 2 | 3) => {
+    const allEvals = await db.getEvaluations();
     const existing = allEvals.find(e => e.studentId === sId && e.trimester === trim);
     
     if (existing) {
@@ -57,10 +60,10 @@ export default function EvaluationPage() {
     }
   };
 
-  const handleTrimesterChange = (trim: 1 | 2 | 3) => {
+  const handleTrimesterChange = async (trim: 1 | 2 | 3) => {
     setTrimester(trim);
     if (studentId) {
-      loadExistingEvaluation(studentId, trim);
+      await loadExistingEvaluation(studentId, trim);
     }
   };
 
@@ -71,7 +74,7 @@ export default function EvaluationPage() {
     }));
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!student || !cls || !user) return;
 
     const items: EvaluationItem[] = Object.entries(evaluations).map(([itemId, level]) => ({
@@ -79,7 +82,7 @@ export default function EvaluationPage() {
       level: level as EvaluationLevel
     }));
 
-    db.addEvaluation({
+    await db.addEvaluation({
       id: Date.now().toString(),
       studentId: student.id,
       classId: cls.id,

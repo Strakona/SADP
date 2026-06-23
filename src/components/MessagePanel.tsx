@@ -18,24 +18,30 @@ export function MessagePanel({ messages, currentUser, onMessageRead }: MessagePa
   const [messageContent, setMessageContent] = useState('');
   const [selectedRecipient, setSelectedRecipient] = useState('');
   const [availableRecipients, setAvailableRecipients] = useState<User[]>([]);
+  const [usersMap, setUsersMap] = useState<Record<string, User>>({});
 
   useEffect(() => {
-    const allUsers = db.getUsers();
-    let recipients: User[] = [];
+    const loadUsers = async () => {
+      const allUsers = await db.getUsers();
+      const map: Record<string, User> = {};
+      allUsers.forEach(u => map[u.id] = u);
+      setUsersMap(map);
 
-    if (currentUser.role === 'developer') {
-      recipients = allUsers.filter(u => u.role === 'coordinator');
-    } else if (currentUser.role === 'coordinator') {
-      recipients = allUsers.filter(u => u.role === 'developer' || u.role === 'teacher');
-    } else if (currentUser.role === 'teacher') {
-      recipients = allUsers.filter(u => u.role === 'coordinator');
-    }
-
-    setAvailableRecipients(recipients);
+      let recipients: User[] = [];
+      if (currentUser.role === 'developer') {
+        recipients = allUsers.filter(u => u.role === 'coordinator');
+      } else if (currentUser.role === 'coordinator') {
+        recipients = allUsers.filter(u => u.role === 'developer' || u.role === 'teacher');
+      } else if (currentUser.role === 'teacher') {
+        recipients = allUsers.filter(u => u.role === 'coordinator');
+      }
+      setAvailableRecipients(recipients);
+    };
+    loadUsers();
   }, [currentUser]);
 
-  const handleMarkAsRead = (msgId: string) => {
-    db.markMessageAsRead(msgId);
+  const handleMarkAsRead = async (msgId: string) => {
+    await db.markMessageAsRead(msgId);
     onMessageRead();
   };
 
@@ -52,11 +58,11 @@ export function MessagePanel({ messages, currentUser, onMessageRead }: MessagePa
     setIsComposing(true);
   };
 
-  const handleSendMessage = (e: React.FormEvent) => {
+  const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedRecipient || !messageContent.trim()) return;
 
-    db.addMessage({
+    await db.addMessage({
       id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
       senderId: currentUser.id,
       receiverId: selectedRecipient,
@@ -72,7 +78,7 @@ export function MessagePanel({ messages, currentUser, onMessageRead }: MessagePa
   };
 
   const getSenderName = (senderId: string) => {
-    const sender = db.getUsers().find(u => u.id === senderId);
+    const sender = usersMap[senderId];
     return sender ? sender.name : 'Usuário Desconhecido';
   };
 
