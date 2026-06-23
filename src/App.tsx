@@ -16,6 +16,7 @@ import StudentDetails from './pages/StudentDetails';
 import EvaluationPage from './pages/Evaluation';
 import ReportsPage from './pages/Reports';
 import TeacherClasses from './pages/TeacherClasses';
+import { InstallPrompt } from './components/InstallPrompt';
 
 const AppContent = () => {
   const { loading } = useAuth();
@@ -30,6 +31,7 @@ const AppContent = () => {
 
   return (
     <BrowserRouter>
+      <InstallPrompt />
       <Routes>
         <Route path="/" element={<Welcome />} />
         <Route path="/login" element={<Login />} />
